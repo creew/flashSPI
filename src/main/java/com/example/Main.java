@@ -7,7 +7,6 @@ import com.fazecast.jSerialComm.SerialPort;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.util.Scanner;
 
 public class Main {
 
@@ -18,7 +17,7 @@ public class Main {
         System.out.println("java -jar FlashSPI.jar r port file size - read flash size 'size' from port 'port to file 'file'");
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         try {
             processArguments(args);
         } catch (SerialPortException | FIleException e) {
@@ -29,7 +28,7 @@ public class Main {
         }
     }
 
-    private static void processArguments(String[] args) throws IOException {
+    private static void processArguments(String[] args) throws IOException, InterruptedException {
         if (args.length < 1) {
             throw new IllegalArgumentException("No arguments passed");
         }
@@ -46,6 +45,9 @@ public class Main {
                 }
                 write(args[1], args[2]);
                 break;
+            case "i":
+                info(args[1]);
+                break;
             case "r":
                 if (args.length < 4) {
                     throw new IllegalArgumentException("Passed less than 4 args");
@@ -57,7 +59,16 @@ public class Main {
         }
     }
 
-    private static void read(String port, String path, String size) throws IOException {
+    private static void info(String port) throws InterruptedException {
+        try (SerialPortInitializer spi = new SerialPortInitializer(port)) {
+            byte[] readStr = ("i" + "\n").getBytes(StandardCharsets.UTF_8);
+            spi.writeBytes(readStr, readStr.length);
+            String s = spi.readLine();
+            System.out.println("line: " + s);
+        }
+    }
+
+    private static void read(String port, String path, String size) throws IOException, InterruptedException {
         Path file= getPath(path);
         int length = getLength(size);
         int startOffset = 0;
@@ -114,13 +125,8 @@ public class Main {
         return file;
     }
 
-    private static void write(String port, String path) {
-        byte[] bytes;
-        try {
-            bytes = Files.readAllBytes(Paths.get(path));
-        } catch (IOException e) {
-            throw new FIleException("Cannot read file: " + path);
-        }
+    private static void write(String port, String path) throws InterruptedException {
+        byte[] bytes = readAllBytes(path);
         int sz = bytes.length;
         int needToAdd = 4096 - sz % 4096;
         byte[] bw = new byte[sz + needToAdd];
@@ -130,8 +136,6 @@ public class Main {
         }
         int startOffset = 0;
         try (SerialPortInitializer spi = new SerialPortInitializer(port)) {
-            Scanner scanner = new Scanner(spi.getInputStream());
-            scanner.useDelimiter("\n");
             for (int i = 0; i < sz; )
             {
                 if (i % 4096 == 0)
@@ -139,7 +143,7 @@ public class Main {
                     byte[] erase = ("e" + (i + startOffset) + "|").getBytes(StandardCharsets.UTF_8);
                     spi.writeBytes(erase, erase.length);
                     System.out.println("\nErase " + i);
-                    String line = scanner.nextLine();
+                    String line = spi.readLine();
                     if (!line.startsWith("OK"))
                     {
                         System.out.println("Sect erase " + i  + " error");
@@ -151,7 +155,7 @@ public class Main {
                 byte[] data = new byte[128];
                 System.arraycopy(bw, i, data, 0, 128);
                 spi.writeBytes(data, 128);
-                String line = scanner.nextLine();
+                String line = spi.readLine();
                 if (!line.startsWith("OK"))
                 {
                     System.out.println(line);
@@ -163,5 +167,15 @@ public class Main {
             }
             System.out.println("Готово!");
         }
+    }
+
+    private static byte[] readAllBytes(String path) {
+        byte[] bytes;
+        try {
+            bytes = Files.readAllBytes(Paths.get(path));
+        } catch (IOException e) {
+            throw new FIleException("Cannot read file: " + path);
+        }
+        return bytes;
     }
 }
